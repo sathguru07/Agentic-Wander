@@ -1,41 +1,42 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { TripPlanResponse } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
+const genAI = new GoogleGenerativeAI(apiKey);
 
 const RESPONSE_SCHEMA = {
-  type: Type.OBJECT,
+  type: SchemaType.OBJECT,
   properties: {
-    trip_summary: { type: Type.STRING },
-    budget_status: { 
-      type: Type.STRING,
+    trip_summary: { type: SchemaType.STRING },
+    budget_status: {
+      type: SchemaType.STRING,
       description: "OK, WARNING, or CRITICAL based on budget feasibility"
     },
-    ml_comparison: { type: Type.STRING },
+    ml_comparison: { type: SchemaType.STRING },
     cost_breakdown: {
-      type: Type.OBJECT,
+      type: SchemaType.OBJECT,
       properties: {
-        transport: { type: Type.STRING },
-        stay: { type: Type.STRING },
-        food: { type: Type.STRING },
-        activities: { type: Type.STRING }
+        transport: { type: SchemaType.STRING },
+        stay: { type: SchemaType.STRING },
+        food: { type: SchemaType.STRING },
+        activities: { type: SchemaType.STRING }
       },
       required: ["transport", "stay", "food", "activities"]
     },
     itinerary: {
-      type: Type.ARRAY,
+      type: SchemaType.ARRAY,
       items: {
-        type: Type.OBJECT,
+        type: SchemaType.OBJECT,
         properties: {
-          time: { type: Type.STRING },
-          activity: { type: Type.STRING },
-          cost_saving_tip: { type: Type.STRING }
+          time: { type: SchemaType.STRING },
+          activity: { type: SchemaType.STRING },
+          cost_saving_tip: { type: SchemaType.STRING }
         },
         required: ["time", "activity", "cost_saving_tip"]
       }
     },
-    local_pro_tip: { type: Type.STRING }
+    local_pro_tip: { type: SchemaType.STRING }
   },
   required: ["trip_summary", "budget_status", "ml_comparison", "cost_breakdown", "itinerary", "local_pro_tip"]
 };
@@ -45,30 +46,37 @@ export const generateTripPlan = async (
   mlBaseCost: number
 ): Promise<TripPlanResponse> => {
   const prompt = `
-    You are the "Agentic Wander Intelligence Engine," a hyper-efficient travel coordinator.
+    You are the "Agentic Wander Intelligence Engine," a highly accurate and frugal travel coordinator.
     
     [USER_QUERY]: ${query}
     [ML_PREDICTED_BASE_COST]: ${mlBaseCost} INR
 
-    OPERATIONAL CONSTRAINTS:
-    - Focus on the most cost-effective local transit (State buses, Sleeper/General trains, shared autos).
-    - If the user's budget in the query is 20% lower than the [ML_PREDICTED_BASE_COST], budget_status MUST be "CRITICAL" (BUDGET_ALARM).
-    - Prioritize Frugal Engineering: finding the maximum experience for the minimum cost.
-    - Provide specific hacks for saving money on stays (hostels, guesthouses) and local food.
+    CRITICAL INSTRUCTIONS:
+    1. **VERIFY THE LOCATION:** If the [USER_QUERY] contains a fake, nonsense, or ambiguous location (e.g., "Xyzabc", "RandomPlace123"), IMMEDIATELY return a plan where "trip_summary" starts with "⚠️ LOCATION UNKNOWN:" followed by a suggestion to check the spelling. Do NOT Hallucinate a trip for a place that doesn't exist.
+    2. **REALISM OVER HYPE:** Provide *strictly* real execution details. 
+       - Transport: Mention specific bus types (e.g., "KSRTC Airavat", "TNSTC Ultra Deluxe") or train classes (e.g., "Sleeper Class", "2S").
+       - Prices: Estimate real-world costs for the current year.
+    3. **FRUGAL ENGINEERING:** Your goal is to maximize the experience within the budget.
+       - Suggest specific hostels, dorms, or budget guesthouses by name if possible.
+       - Recommend specific local street food spots or budget messes.
+    4. **BUDGET LOGIC:**
+       - If the user's budget is < 500 INR/day, warn them it's extremely tight.
+       - If budget < [ML_PREDICTED_BASE_COST] * 0.8, set "budget_status" to "CRITICAL".
+    5. **ITINERARY:** Create a logical flow (Morning -> Afternoon -> Evening). Do not just list random activities.
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      generationConfig: {
         responseMimeType: "application/json",
-        responseSchema: RESPONSE_SCHEMA,
+        responseSchema: RESPONSE_SCHEMA as any,
       },
     });
 
-    const result = JSON.parse(response.text || "{}");
-    return result as TripPlanResponse;
+    const result = await model.generateContent(prompt);
+
+    return JSON.parse(result.response.text()) as TripPlanResponse;
   } catch (error) {
     console.error("Gemini API Error:", error);
     throw error;

@@ -2,14 +2,14 @@
 import React, { useState } from 'react';
 import { TripPlanResponse, UserQuery } from './types';
 import { generateTripPlan } from './services/geminiService';
-import { 
-  MapPin, 
-  Calendar, 
-  Wallet, 
-  ChevronRight, 
-  AlertTriangle, 
-  CheckCircle, 
-  Zap, 
+import {
+  MapPin,
+  Calendar,
+  Wallet,
+  ChevronRight,
+  AlertTriangle,
+  CheckCircle,
+  Zap,
   TrendingDown,
   Clock,
   Bus,
@@ -34,7 +34,7 @@ const App: React.FC = () => {
   const getPredictedBaseCost = (q: UserQuery) => {
     let base = 1500;
     const days = parseInt(q.duration) || 1;
-    
+
     const d = q.destination.toLowerCase();
     if (d.includes('pond')) base = 1800;
     else if (d.includes('bang')) base = 2200;
@@ -59,7 +59,8 @@ const App: React.FC = () => {
       const result = await generateTripPlan(queryString, mlCost);
       setPlan(result);
     } catch (err) {
-      setError("Failed to connect to the Intelligence Engine. Please try again.");
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -135,13 +136,26 @@ const App: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                <button
-                  disabled={loading}
-                  className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2 group"
-                >
-                  {loading ? 'Initializing Agent...' : 'Optimize Travel'}
-                  <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    disabled={loading}
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2 group"
+                  >
+                    {loading ? 'Initializing Agent...' : 'Optimize Travel'}
+                    <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                  </button>
+                  {query.destination && (
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query.destination)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white w-16 rounded-xl flex items-center justify-center transition-all group"
+                      title="Verify Location on Google Maps"
+                    >
+                      <MapPin className="w-6 h-6 text-blue-500 group-hover:scale-110 transition-transform" />
+                    </a>
+                  )}
+                </div>
               </form>
             </div>
 
@@ -159,7 +173,7 @@ const App: React.FC = () => {
 
           <div className="lg:col-span-8 space-y-8">
             {loading && <LoadingScreen />}
-            
+
             {error && (
               <div className="bg-red-900/20 border border-red-500/50 p-6 rounded-2xl flex items-start gap-4">
                 <AlertTriangle className="w-6 h-6 text-red-500 shrink-0" />
@@ -179,15 +193,14 @@ const App: React.FC = () => {
             {plan && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8">
                 {/* Status Bar */}
-                <div className={`p-4 rounded-2xl border flex items-center justify-between shadow-2xl ${
-                  plan.budget_status === 'CRITICAL' ? 'bg-red-900/20 border-red-500/50' :
+                <div className={`p-4 rounded-2xl border flex items-center justify-between shadow-2xl ${plan.budget_status === 'CRITICAL' ? 'bg-red-900/20 border-red-500/50' :
                   plan.budget_status === 'WARNING' ? 'bg-amber-900/20 border-amber-500/50' :
-                  'bg-emerald-900/20 border-emerald-500/50'
-                }`}>
+                    'bg-emerald-900/20 border-emerald-500/50'
+                  }`}>
                   <div className="flex items-center gap-3">
-                    {plan.budget_status === 'CRITICAL' ? <AlertTriangle className="text-red-500" /> : 
-                     plan.budget_status === 'WARNING' ? <AlertTriangle className="text-amber-500" /> : 
-                     <CheckCircle className="text-emerald-500" />}
+                    {plan.budget_status === 'CRITICAL' ? <AlertTriangle className="text-red-500" /> :
+                      plan.budget_status === 'WARNING' ? <AlertTriangle className="text-amber-500" /> :
+                        <CheckCircle className="text-emerald-500" />}
                     <div>
                       <p className="text-xs uppercase font-bold tracking-tighter opacity-70">Budget Status</p>
                       <p className="font-bold text-lg">{plan.budget_status === 'CRITICAL' ? 'BUDGET ALARM' : plan.budget_status + ' LIMITS'}</p>
@@ -203,7 +216,7 @@ const App: React.FC = () => {
                   <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl space-y-4">
                     <h3 className="text-blue-400 font-bold uppercase text-xs tracking-widest">Strategy Summary</h3>
                     <p className="text-xl font-semibold leading-snug">{plan.trip_summary}</p>
-                    
+
                     <div className="pt-4 border-t border-slate-800 flex items-center gap-4">
                       <div className="bg-blue-500/20 p-2 rounded-lg">
                         <Zap className="w-5 h-5 text-blue-500" />
@@ -241,10 +254,10 @@ const App: React.FC = () => {
                           <PieChart>
                             <Pie
                               data={[
-                                { name: 'Transport', value: parseInt(plan.cost_breakdown.transport.replace(/\D/g,'')) || 1 },
-                                { name: 'Stay', value: parseInt(plan.cost_breakdown.stay.replace(/\D/g,'')) || 1 },
-                                { name: 'Food', value: parseInt(plan.cost_breakdown.food.replace(/\D/g,'')) || 1 },
-                                { name: 'Activities', value: parseInt(plan.cost_breakdown.activities.replace(/\D/g,'')) || 1 },
+                                { name: 'Transport', value: parseInt(plan.cost_breakdown.transport.replace(/\D/g, '')) || 1 },
+                                { name: 'Stay', value: parseInt(plan.cost_breakdown.stay.replace(/\D/g, '')) || 1 },
+                                { name: 'Food', value: parseInt(plan.cost_breakdown.food.replace(/\D/g, '')) || 1 },
+                                { name: 'Activities', value: parseInt(plan.cost_breakdown.activities.replace(/\D/g, '')) || 1 },
                               ]}
                               innerRadius={25}
                               outerRadius={40}
@@ -255,7 +268,7 @@ const App: React.FC = () => {
                                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                               ))}
                             </Pie>
-                            <Tooltip 
+                            <Tooltip
                               contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', fontSize: '10px' }}
                             />
                           </PieChart>
@@ -284,7 +297,7 @@ const App: React.FC = () => {
                         <div className="absolute left-0 top-1.5 w-6 h-6 bg-slate-800 border-2 border-blue-500/50 rounded-full flex items-center justify-center">
                           <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
                         </div>
-                        
+
                         <div className="space-y-1">
                           <div className="flex items-center gap-3">
                             <span className="text-blue-400 font-mono text-sm font-medium">{item.time}</span>
