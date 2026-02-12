@@ -22,6 +22,7 @@ export interface TripPlanResponse {
 }
 
 export interface UserQuery {
+  from: string;
   destination: string;
   duration: string;
   budget: number;
