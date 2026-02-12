@@ -1,7 +1,8 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TripPlanResponse, UserQuery } from './types';
 import { generateTripPlan } from './services/geminiService';
+import { fetchNearbyPlaces } from './services/googleMapsService';
 import {
   MapPin,
   Calendar,
@@ -15,22 +16,49 @@ import {
   Bus,
   Bed,
   Utensils,
-  Backpack
+  Backpack,
+  LogOut,
+  Plane,
+  Train,
+  Car
 } from 'lucide-react';
 import LoadingScreen from './components/LoadingScreen';
+import { AuthPage } from './components/AuthPage';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 const App: React.FC = () => {
+  const [user, setUser] = useState<{ email: string; name: string } | null>(null);
   const [query, setQuery] = useState<UserQuery>({
     from: 'Chennai',
     destination: 'Pondicherry',
     duration: '2 Days',
-    budget: 3000
+    budget: 3000,
+    transportType: 'Any'
   });
   const [loading, setLoading] = useState(false);
   const [plan, setPlan] = useState<TripPlanResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [locatingFrom, setLocatingFrom] = useState(false);
+
+  // Load user from localStorage on mount
+  useEffect(() => {
+    const savedUser = localStorage.getItem('user');
+    if (savedUser) {
+      setUser(JSON.parse(savedUser));
+    }
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('user');
+    setUser(null);
+    setPlan(null);
+    setError(null);
+  };
+
+  // If not logged in, show auth page
+  if (!user) {
+    return <AuthPage onLogin={(email, name) => setUser({ email, name })} />;
+  }
 
   // Mock ML Logic: Predicts a base cost based on destination keywords and duration
   const getPredictedBaseCost = (q: UserQuery) => {
@@ -58,11 +86,25 @@ const App: React.FC = () => {
     const queryString = `Travel from ${query.from} to ${query.destination} for ${query.duration} with ${query.budget} INR budget.`;
 
     try {
-      const result = await generateTripPlan(queryString, mlCost);
+      // Fetch real places from Google Maps
+      const [hotels, attractions, restaurants] = await Promise.all([
+        fetchNearbyPlaces(query.destination, 'lodging'),
+        fetchNearbyPlaces(query.destination, 'tourist_attraction'),
+        fetchNearbyPlaces(query.destination, 'restaurant')
+      ]);
+
+      const result = await generateTripPlan(
+        queryString,
+        mlCost,
+        query.transportType,
+        hotels,
+        attractions,
+        restaurants
+      );
       setPlan(result);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred";
-      
+
       if (errorMessage.includes("quota") || errorMessage.includes("429") || errorMessage.includes("Quota")) {
         setError("API quota exceeded. Please check your Gemini API billing and quota limits at https://ai.google.dev/");
       } else if (errorMessage.includes("API key") || errorMessage.includes("authentication")) {
@@ -136,6 +178,15 @@ const App: React.FC = () => {
               <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
               ML Engine Active
             </span>
+            <div className="w-px h-6 bg-slate-700/50"></div>
+            <span className="text-slate-300">{user.name}</span>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-red-500/10 hover:text-red-400 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+              Logout
+            </button>
           </div>
         </div>
       </nav>
@@ -149,10 +200,10 @@ const App: React.FC = () => {
             <div className="group relative">
               {/* Glow Effect */}
               <div className="absolute -inset-0.5 bg-gradient-to-br from-blue-600/20 to-indigo-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-              
+
               <div className="relative bg-slate-950/40 backdrop-blur-xl border border-blue-500/20 rounded-2xl p-8 shadow-2xl hover:border-blue-500/40 transition-all duration-300">
                 <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-blue-500/5 to-indigo-500/5 pointer-events-none"></div>
-                
+
                 <div className="relative space-y-6">
                   <div>
                     <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-300 to-indigo-300 bg-clip-text text-transparent mb-1">Trip Planner</h2>
@@ -231,6 +282,29 @@ const App: React.FC = () => {
                       </div>
                     </div>
 
+                    {/* Transport Preferences */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-300 uppercase tracking-widest flex items-center gap-2">
+                        <Plane className="w-4 h-4 text-purple-400" />
+                        Preferred Transport
+                      </label>
+                      <div className="grid grid-cols-4 gap-2">
+                        {(['Any', 'Flight', 'Train', 'Bus'] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setQuery({ ...query, transportType: mode })}
+                            className={`px-2 py-2 rounded-lg text-xs font-semibold transition-all border ${query.transportType === mode
+                              ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20'
+                              : 'bg-slate-800/50 border-slate-600/50 text-slate-400 hover:bg-slate-700/50 hover:text-slate-200'
+                              }`}
+                          >
+                            {mode}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     {/* Search Button */}
                     <button
                       disabled={loading}
@@ -267,12 +341,12 @@ const App: React.FC = () => {
             </div>
           </div>
 
-        {/* MIDDLE COLUMN: Budget Analysis */}
+          {/* MIDDLE COLUMN: Budget Analysis */}
           <div className="space-y-6">
             {loading && (
               <div className="relative group">
                 <div className="absolute -inset-0.5 bg-gradient-to-br from-blue-600/20 to-indigo-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                <div className="relative bg-slate-950/40 backdrop-blur-xl border border-blue-500/20 rounded-2xl p-8 min-h-[400px]">
+                <div className="relative bg-slate-950/40 backdrop-blur-xl border border-blue-500/20 rounded-2xl p-8 h-[500px] flex items-center justify-center">
                   <LoadingScreen />
                 </div>
               </div>
@@ -303,7 +377,7 @@ const App: React.FC = () => {
                 {/* ML Prediction vs Budget */}
                 <div className={`relative group overflow-hidden rounded-2xl`}>
                   <div className={`absolute -inset-0.5 bg-gradient-to-br ${plan.budget_status === 'CRITICAL' ? 'from-red-600/20 to-orange-600/20' : plan.budget_status === 'WARNING' ? 'from-amber-600/20 to-orange-600/20' : 'from-emerald-600/20 to-green-600/20'} rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500`}></div>
-                  
+
                   <div className={`relative bg-slate-950/40 backdrop-blur-xl border ${plan.budget_status === 'CRITICAL' ? 'border-red-500/30' : plan.budget_status === 'WARNING' ? 'border-amber-500/30' : 'border-emerald-500/30'} rounded-2xl p-6`}>
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
@@ -322,21 +396,61 @@ const App: React.FC = () => {
                       )}
 
                       {/* Cost Comparison */}
-                      <div className="grid grid-cols-2 gap-4 pt-2">
-                        <div className="bg-blue-500/10 rounded-lg p-4 border border-blue-500/30">
-                          <p className="text-xs text-blue-300 font-bold uppercase tracking-wide mb-2">Estimate</p>
-                          <p className="text-2xl font-bold text-blue-300">₹{plan.ml_comparison?.split('vs')[0]?.trim() || 'N/A'}</p>
-                          <p className="text-xs text-slate-500 mt-1">AI Prediction</p>
+                      <div className="grid grid-cols-2 gap-4 pt-4">
+                        <div className="bg-gradient-to-br from-blue-500/20 to-blue-500/5 rounded-xl p-6 border border-blue-500/40 hover:border-blue-500/60 transition-all">
+                          <p className="text-xs text-blue-300/70 font-bold uppercase tracking-widest mb-3">ML Estimate</p>
+                          <div className="flex items-baseline gap-1 mb-2">
+                            <span className="text-3xl font-bold text-blue-200">₹{(plan.ml_comparison?.match(/\d+/)?.[0]) || getPredictedBaseCost(query)}</span>
+                          </div>
+                          <p className="text-xs text-blue-300/50">AI Predicted Cost</p>
                         </div>
-                        <div className="bg-indigo-500/10 rounded-lg p-4 border border-indigo-500/30">
-                          <p className="text-xs text-indigo-300 font-bold uppercase tracking-wide mb-2">Budget</p>
-                          <p className="text-2xl font-bold text-indigo-300">₹{query.budget}</p>
-                          <p className="text-xs text-slate-500 mt-1">Your allocation</p>
+                        <div className="bg-gradient-to-br from-indigo-500/20 to-indigo-500/5 rounded-xl p-6 border border-indigo-500/40 hover:border-indigo-500/60 transition-all">
+                          <p className="text-xs text-indigo-300/70 font-bold uppercase tracking-widest mb-3">Your Budget</p>
+                          <div className="flex items-baseline gap-1 mb-2">
+                            <span className="text-3xl font-bold text-indigo-200">₹{query.budget}</span>
+                          </div>
+                          <p className="text-xs text-indigo-300/50">Total Allocation</p>
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
+
+                {/* Transport Options */}
+                {plan.transport_options && plan.transport_options.length > 0 && (
+                  <div className="relative group">
+                    <div className="absolute -inset-0.5 bg-gradient-to-br from-cyan-600/20 to-blue-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                    <div className="relative bg-slate-950/40 backdrop-blur-xl border border-cyan-500/20 rounded-2xl p-6">
+                      <p className="text-xs font-bold text-cyan-300 uppercase tracking-widest mb-3">Transport Options</p>
+                      <div className="grid grid-cols-1 gap-3">
+                        {plan.transport_options.map((opt, idx) => (
+                          <div key={idx} className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-3 flex items-center justify-between hover:bg-slate-800/60 transition-colors cursor-pointer group/item">
+                            <div className="flex items-center gap-3">
+                              <div className="bg-slate-700/50 p-2 rounded-lg text-slate-300 group-hover/item:text-cyan-400 transition-colors">
+                                {opt.type === 'Flight' ? <Plane className="w-5 h-5" /> :
+                                  opt.type === 'Train' ? <Train className="w-5 h-5" /> :
+                                    opt.type === 'Bus' ? <Bus className="w-5 h-5" /> :
+                                      <Car className="w-5 h-5" />}
+                              </div>
+                              <div>
+                                <p className="font-semibold text-slate-200 text-sm">{opt.name}</p>
+                                <p className="text-xs text-slate-400">{opt.duration} • <span className={
+                                  opt.comfort_rating === 'High' ? 'text-emerald-400' :
+                                    opt.comfort_rating === 'Medium' ? 'text-amber-400' :
+                                      'text-red-400'
+                                }> Comfort: {opt.comfort_rating}</span></p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-bold text-cyan-300 text-sm">{opt.cost}</p>
+                              <p className="text-[10px] text-slate-500 uppercase tracking-wider">Approx.</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Trip Summary */}
                 <div className="relative group">
@@ -344,7 +458,7 @@ const App: React.FC = () => {
                   <div className="relative bg-slate-950/40 backdrop-blur-xl border border-blue-500/20 rounded-2xl p-6">
                     <p className="text-xs font-bold text-blue-300 uppercase tracking-widest mb-3">Trip Overview</p>
                     <p className="text-base text-slate-100 leading-relaxed font-medium">{plan.trip_summary}</p>
-                    
+
                     {/* Pro Tip */}
                     <div className="mt-4 pt-4 border-t border-slate-700/50 flex items-start gap-3">
                       <div className="bg-emerald-500/20 p-2 rounded-lg h-fit">
@@ -361,28 +475,28 @@ const App: React.FC = () => {
             )}
           </div>
 
-        {/* RIGHT COLUMN: Cost Allocation Donut Chart */}
+          {/* RIGHT COLUMN: Cost Allocation Donut Chart */}
           <div className="space-y-6">
             {loading && (
               <div className="relative group">
                 <div className="absolute -inset-0.5 bg-gradient-to-br from-purple-600/20 to-pink-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                <div className="relative bg-slate-950/40 backdrop-blur-xl border border-purple-500/20 rounded-2xl p-8 flex flex-col items-center justify-center min-h-[400px]">
+                <div className="relative bg-slate-950/40 backdrop-blur-xl border border-purple-500/20 rounded-2xl p-8 h-[500px] flex flex-col items-center justify-center">
                   <div className="flex items-center justify-center gap-2 mb-6">
-                    <div className="w-2 h-12 bg-gradient-to-t from-purple-400 to-purple-400/20 rounded-full animate-bounce" style={{animationDelay: '0s', animationDuration: '1s'}}></div>
-                    <div className="w-2 h-12 bg-gradient-to-t from-pink-400 to-pink-400/20 rounded-full animate-bounce" style={{animationDelay: '0.2s', animationDuration: '1s'}}></div>
-                    <div className="w-2 h-12 bg-gradient-to-t from-purple-400 to-purple-400/20 rounded-full animate-bounce" style={{animationDelay: '0.4s', animationDuration: '1s'}}></div>
-                    <div className="w-2 h-12 bg-gradient-to-t from-pink-400 to-pink-400/20 rounded-full animate-bounce" style={{animationDelay: '0.6s', animationDuration: '1s'}}></div>
+                    <div className="w-2 h-12 bg-gradient-to-t from-purple-400 to-purple-400/20 rounded-full animate-bounce" style={{ animationDelay: '0s', animationDuration: '1s' }}></div>
+                    <div className="w-2 h-12 bg-gradient-to-t from-pink-400 to-pink-400/20 rounded-full animate-bounce" style={{ animationDelay: '0.2s', animationDuration: '1s' }}></div>
+                    <div className="w-2 h-12 bg-gradient-to-t from-purple-400 to-purple-400/20 rounded-full animate-bounce" style={{ animationDelay: '0.4s', animationDuration: '1s' }}></div>
+                    <div className="w-2 h-12 bg-gradient-to-t from-pink-400 to-pink-400/20 rounded-full animate-bounce" style={{ animationDelay: '0.6s', animationDuration: '1s' }}></div>
                   </div>
                   <h3 className="text-lg font-bold text-purple-300 mb-2">Analyzing costs...</h3>
                   <p className="text-sm text-slate-400">Building your cost breakdown</p>
                 </div>
               </div>
             )}
-            
+
             {plan && !loading && (
               <div className="relative group">
                 <div className="absolute -inset-0.5 bg-gradient-to-br from-purple-600/20 to-pink-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                
+
                 <div className="relative bg-slate-950/40 backdrop-blur-xl border border-purple-500/20 rounded-2xl p-8">
                   <div className="space-y-6">
                     <div>
@@ -477,7 +591,7 @@ const App: React.FC = () => {
           <div className="mt-12">
             <div className="relative group">
               <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-600/20 via-indigo-600/20 to-purple-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-              
+
               <div className="relative bg-slate-950/40 backdrop-blur-xl border border-blue-500/20 rounded-2xl overflow-hidden">
                 <div className="px-8 py-6 border-b border-slate-700/50 flex items-center justify-between bg-gradient-to-r from-blue-500/5 to-indigo-500/5">
                   <h3 className="font-bold text-lg flex items-center gap-3">
@@ -495,7 +609,7 @@ const App: React.FC = () => {
                       {idx !== plan.itinerary.length - 1 && (
                         <div className="absolute left-4 top-10 bottom-0 w-0.5 bg-gradient-to-b from-blue-500/50 to-transparent"></div>
                       )}
-                      
+
                       {/* Timeline Dot */}
                       <div className="absolute left-0 top-0 w-9 h-9 bg-gradient-to-br from-blue-500/20 to-indigo-500/20 border-2 border-blue-500/50 rounded-full flex items-center justify-center">
                         <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
