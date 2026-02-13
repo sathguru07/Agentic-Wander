@@ -20,11 +20,20 @@ import {
   LogOut,
   Plane,
   Train,
-  Car
+  Car,
+  Eye,
+  Satellite,
+  Camera,
+  Settings
 } from 'lucide-react';
 import LoadingScreen from './components/LoadingScreen';
 import { AuthPage } from './components/AuthPage';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { decryptData } from './services/securityService';
+import { SavedTrip, saveTrip, getSavedTrips, deleteTrip } from './services/tripService';
+import { Trash2, Save, ExternalLink } from 'lucide-react';
+import { useGeolocation } from './hooks/useGeolocation';
+
+const LazyCostChart = React.lazy(() => import('./components/CostChart'));
 
 const App: React.FC = () => {
   const [user, setUser] = useState<{ email: string; name: string } | null>(null);
@@ -38,14 +47,26 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [plan, setPlan] = useState<TripPlanResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [locatingFrom, setLocatingFrom] = useState(false);
+  // locatingFrom is now handled by useGeolocation hook
+  const [savedTrips, setSavedTrips] = useState<SavedTrip[]>([]);
+  const [customizeBudget, setCustomizeBudget] = useState(false);
+  const [budgetAllocation, setBudgetAllocation] = useState({
+    transport: 0,
+    stay: 0,
+    food: 0,
+    activities: 0
+  });
 
-  // Load user from localStorage on mount
+  // Load user and saved trips on mount
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
+      const decryptedUser = decryptData(savedUser);
+      if (decryptedUser) {
+        setUser(decryptedUser);
+      }
     }
+    setSavedTrips(getSavedTrips());
   }, []);
 
   const handleLogout = () => {
@@ -93,13 +114,20 @@ const App: React.FC = () => {
         fetchNearbyPlaces(query.destination, 'restaurant')
       ]);
 
+      // Add custom budget breakdown if enabled
+      const queryWithBudget = customizeBudget &&
+        (budgetAllocation.transport + budgetAllocation.stay + budgetAllocation.food + budgetAllocation.activities <= query.budget)
+        ? { ...query, budgetBreakdown: budgetAllocation }
+        : query;
+
       const result = await generateTripPlan(
         queryString,
         mlCost,
-        query.transportType,
+        queryWithBudget.transportType,
         hotels,
         attractions,
-        restaurants
+        restaurants,
+        queryWithBudget.budgetBreakdown
       );
       setPlan(result);
     } catch (err) {
@@ -118,40 +146,68 @@ const App: React.FC = () => {
     }
   };
 
+  // Custom Hook for Geolocation
+  const {
+    loading: locatingFrom,
+    error: locationError,
+    locationName,
+    getCurrentLocation
+  } = useGeolocation();
+
+  // Effect to update query when location is found
+  useEffect(() => {
+    if (locationName) {
+      setQuery(prev => ({ ...prev, from: locationName }));
+    }
+    if (locationError) {
+      setError(locationError);
+    }
+  }, [locationName, locationError]);
+
   const handleGetCurrentLocation = () => {
-    setLocatingFrom(true);
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const { latitude, longitude } = position.coords;
-          try {
-            // Reverse geocode using Open Street Map's Nominatim API
-            const response = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
-            );
-            const data = await response.json();
-            const cityName = data.address?.city || data.address?.town || data.address?.village || 'Current Location';
-            setQuery({ ...query, from: cityName });
-          } catch (err) {
-            console.error('Error fetching location name:', err);
-            setQuery({ ...query, from: `${latitude.toFixed(2)}, ${longitude.toFixed(2)}` });
-          } finally {
-            setLocatingFrom(false);
-          }
-        },
-        (error) => {
-          console.error('Geolocation error:', error);
-          setError('Unable to access your location. Please enable location permissions.');
-          setLocatingFrom(false);
-        }
-      );
-    } else {
-      setError('Geolocation is not supported by your browser.');
-      setLocatingFrom(false);
+    getCurrentLocation();
+  };
+
+
+
+  const handleSaveTrip = () => {
+    if (plan) {
+      const newTrip = saveTrip(query, plan);
+      setSavedTrips([newTrip, ...savedTrips]);
+      alert('Trip saved successfully!');
     }
   };
 
-  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'];
+  const handleDeleteTrip = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm('Are you sure you want to delete this trip?')) {
+      const updated = deleteTrip(id);
+      setSavedTrips(updated);
+    }
+  };
+
+  const handleLoadTrip = (trip: SavedTrip) => {
+    setQuery(trip.query);
+    setPlan(trip.plan);
+  };
+
+  const openStreetView = (location: string) => {
+    const searchQuery = encodeURIComponent(`${location}, ${query.destination}`);
+    const streetViewUrl = `https://www.google.com/maps/search/${searchQuery}/@?layer=c&cbll=`;
+    window.open(streetViewUrl, '_blank');
+  };
+
+  const openSatelliteView = (location: string) => {
+    const searchQuery = encodeURIComponent(`${location}, ${query.destination}`);
+    const satelliteUrl = `https://www.google.com/maps/search/${searchQuery}/@?layer=y`;
+    window.open(satelliteUrl, '_blank');
+  };
+
+  const openPhotos = (location: string) => {
+    const searchQuery = encodeURIComponent(`${location}, ${query.destination}`);
+    const photosUrl = `https://www.google.com/maps/search/${searchQuery}`;
+    window.open(photosUrl, '_blank');
+  };
 
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-200 selection:bg-blue-500/30 overflow-x-hidden">
@@ -229,10 +285,11 @@ const App: React.FC = () => {
                           type="button"
                           onClick={handleGetCurrentLocation}
                           disabled={locatingFrom}
+                          aria-label="Use my current location"
                           className="bg-slate-800/50 hover:bg-slate-700/50 disabled:bg-slate-800/50 border border-slate-600/50 hover:border-blue-500/50 text-blue-400 px-3 py-3 rounded-lg flex items-center justify-center transition-all group disabled:opacity-50 backdrop-blur-sm"
                           title="Use my location"
                         >
-                          <MapPin className={`w-4 h-4 ${locatingFrom ? 'animate-pulse' : 'group-hover:scale-110'} transition-transform`} />
+                          <MapPin className={`w-4 h-4 ${locatingFrom ? 'animate-pulse' : 'group-hover:scale-110'} transition-transform`} aria-hidden="true" />
                         </button>
                       </div>
                     </div>
@@ -305,6 +362,125 @@ const App: React.FC = () => {
                       </div>
                     </div>
 
+                    {/* Budget Customization Toggle */}
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setCustomizeBudget(!customizeBudget)}
+                        className="w-full flex items-center justify-between p-3 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:bg-slate-700/50 transition-all text-sm"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Settings className="w-4 h-4 text-blue-400" />
+                          <span className="text-slate-300 font-medium">Customize Budget Allocation</span>
+                        </div>
+                        <div className={`w-10 h-5 rounded-full transition-colors ${customizeBudget ? 'bg-blue-600' : 'bg-slate-600'} relative`}>
+                          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${customizeBudget ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
+                        </div>
+                      </button>
+
+                      {/* Budget Allocation Sliders */}
+                      {customizeBudget && (
+                        <div className="mt-4 space-y-4 p-4 bg-slate-900/50 rounded-lg border border-slate-700/30">
+                          <p className="text-xs text-slate-400 mb-3">Allocate your ₹{query.budget} budget across categories:</p>
+
+                          {/* Transport Slider */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="text-xs font-medium text-slate-300 flex items-center gap-2">
+                                <Bus className="w-3 h-3 text-blue-400" />
+                                Transport
+                              </label>
+                              <span className="text-xs font-bold text-blue-400">₹{budgetAllocation.transport}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max={query.budget}
+                              value={budgetAllocation.transport}
+                              onChange={(e) => setBudgetAllocation({ ...budgetAllocation, transport: parseInt(e.target.value) })}
+                              className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                            />
+                          </div>
+
+                          {/* Stay Slider */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="text-xs font-medium text-slate-300 flex items-center gap-2">
+                                <Bed className="w-3 h-3 text-emerald-400" />
+                                Stay
+                              </label>
+                              <span className="text-xs font-bold text-emerald-400">₹{budgetAllocation.stay}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max={query.budget}
+                              value={budgetAllocation.stay}
+                              onChange={(e) => setBudgetAllocation({ ...budgetAllocation, stay: parseInt(e.target.value) })}
+                              className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                            />
+                          </div>
+
+                          {/* Food Slider */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="text-xs font-medium text-slate-300 flex items-center gap-2">
+                                <Utensils className="w-3 h-3 text-amber-400" />
+                                Food
+                              </label>
+                              <span className="text-xs font-bold text-amber-400">₹{budgetAllocation.food}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max={query.budget}
+                              value={budgetAllocation.food}
+                              onChange={(e) => setBudgetAllocation({ ...budgetAllocation, food: parseInt(e.target.value) })}
+                              className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                            />
+                          </div>
+
+                          {/* Activities Slider */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="text-xs font-medium text-slate-300 flex items-center gap-2">
+                                <Backpack className="w-3 h-3 text-purple-400" />
+                                Activities
+                              </label>
+                              <span className="text-xs font-bold text-purple-400">₹{budgetAllocation.activities}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max={query.budget}
+                              value={budgetAllocation.activities}
+                              onChange={(e) => setBudgetAllocation({ ...budgetAllocation, activities: parseInt(e.target.value) })}
+                              className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                            />
+                          </div>
+
+                          {/* Total Validation */}
+                          <div className="pt-3 border-t border-slate-700/50">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-slate-400">Total Allocated:</span>
+                              <span className={`font-bold ${budgetAllocation.transport + budgetAllocation.stay + budgetAllocation.food + budgetAllocation.activities > query.budget
+                                ? 'text-red-400'
+                                : 'text-green-400'
+                                }`}>
+                                ₹{budgetAllocation.transport + budgetAllocation.stay + budgetAllocation.food + budgetAllocation.activities} / ₹{query.budget}
+                              </span>
+                            </div>
+                            {budgetAllocation.transport + budgetAllocation.stay + budgetAllocation.food + budgetAllocation.activities > query.budget && (
+                              <p className="text-xs text-red-400 mt-2 flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3" />
+                                Total exceeds budget!
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Search Button */}
                     <button
                       disabled={loading}
@@ -363,12 +539,50 @@ const App: React.FC = () => {
             )}
 
             {!loading && !plan && !error && (
-              <div className="bg-gradient-to-br from-slate-800/30 to-slate-900/30 border-2 border-dashed border-slate-600/30 rounded-2xl p-12 flex flex-col items-center justify-center min-h-96 text-center backdrop-blur-xl">
-                <div className="bg-slate-800/50 p-4 rounded-xl mb-4">
-                  <Backpack className="w-12 h-12 text-slate-600" />
-                </div>
-                <p className="text-sm font-semibold text-slate-300 mb-2">Ready to Plan</p>
-                <p className="text-xs text-slate-500 max-w-xs">Configure your trip in the left panel to see ML-powered budget analysis here.</p>
+              <div className="space-y-6">
+                {/* Saved Trips List */}
+                {savedTrips.length > 0 ? (
+                  <div className="bg-slate-950/40 backdrop-blur-xl border border-blue-500/20 rounded-2xl p-6">
+                    <p className="text-xs font-bold text-blue-300 uppercase tracking-widest mb-4 flex items-center gap-2">
+                      <Save className="w-4 h-4" />
+                      Saved Trips ({savedTrips.length})
+                    </p>
+                    <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                      {savedTrips.map((trip) => (
+                        <div
+                          key={trip.id}
+                          onClick={() => handleLoadTrip(trip)}
+                          className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 flex items-center justify-between hover:bg-slate-800/60 transition-all cursor-pointer group"
+                        >
+                          <div>
+                            <p className="font-semibold text-slate-200 text-sm">{trip.query.from} ➝ {trip.query.destination}</p>
+                            <p className="text-xs text-slate-400 mt-1">
+                              {trip.query.duration} • ₹{trip.query.budget} • {new Date(trip.createdAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={(e) => handleDeleteTrip(trip.id, e)}
+                              className="p-2 rounded-lg bg-red-500/10 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/20"
+                              title="Delete Trip"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                            <ExternalLink className="w-4 h-4 text-slate-500 group-hover:text-blue-400 transition-colors" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-gradient-to-br from-slate-800/30 to-slate-900/30 border-2 border-dashed border-slate-600/30 rounded-2xl p-12 flex flex-col items-center justify-center min-h-96 text-center backdrop-blur-xl">
+                    <div className="bg-slate-800/50 p-4 rounded-xl mb-4">
+                      <Backpack className="w-12 h-12 text-slate-600" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-300 mb-2">Ready to Plan</p>
+                    <p className="text-xs text-slate-500 max-w-xs">Configure your trip in the left panel to see ML-powered budget analysis here.</p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -400,7 +614,7 @@ const App: React.FC = () => {
                         <div className="bg-gradient-to-br from-blue-500/20 to-blue-500/5 rounded-xl p-6 border border-blue-500/40 hover:border-blue-500/60 transition-all">
                           <p className="text-xs text-blue-300/70 font-bold uppercase tracking-widest mb-3">ML Estimate</p>
                           <div className="flex items-baseline gap-1 mb-2">
-                            <span className="text-3xl font-bold text-blue-200">₹{(plan.ml_comparison?.match(/\d+/)?.[0]) || getPredictedBaseCost(query)}</span>
+                            <span className="text-3xl font-bold text-blue-200">₹{getPredictedBaseCost(query)}</span>
                           </div>
                           <p className="text-xs text-blue-300/50">AI Predicted Cost</p>
                         </div>
@@ -443,7 +657,21 @@ const App: React.FC = () => {
                             </div>
                             <div className="text-right">
                               <p className="font-bold text-cyan-300 text-sm">{opt.cost}</p>
-                              <p className="text-[10px] text-slate-500 uppercase tracking-wider">Approx.</p>
+                              <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Estimated</p>
+                              <a
+                                href={
+                                  opt.type === 'Train' ? `https://www.google.com/search?q=train+from+${encodeURIComponent(query.from)}+to+${encodeURIComponent(query.destination)}` :
+                                    opt.type === 'Bus' ? `https://www.redbus.in/bus-tickets/${query.from.toLowerCase()}-to-${query.destination.toLowerCase()}` :
+                                      opt.type === 'Flight' ? `https://www.google.com/travel/flights?q=flights+from+${encodeURIComponent(query.from)}+to+${encodeURIComponent(query.destination)}` :
+                                        `https://www.google.com/maps/dir/${encodeURIComponent(query.from)}/${encodeURIComponent(query.destination)}`
+                                }
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[10px] text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 justify-end"
+                              >
+                                Verify Fare
+                                <ChevronRight className="w-3 h-3" />
+                              </a>
                             </div>
                           </div>
                         ))}
@@ -456,7 +684,16 @@ const App: React.FC = () => {
                 <div className="relative group">
                   <div className="absolute -inset-0.5 bg-gradient-to-br from-blue-600/20 to-indigo-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
                   <div className="relative bg-slate-950/40 backdrop-blur-xl border border-blue-500/20 rounded-2xl p-6">
-                    <p className="text-xs font-bold text-blue-300 uppercase tracking-widest mb-3">Trip Overview</p>
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-xs font-bold text-blue-300 uppercase tracking-widest">Trip Overview</p>
+                      <button
+                        onClick={handleSaveTrip}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors text-xs font-bold border border-blue-500/30"
+                      >
+                        <Save className="w-4 h-4" />
+                        Save Trip
+                      </button>
+                    </div>
                     <p className="text-base text-slate-100 leading-relaxed font-medium">{plan.trip_summary}</p>
 
                     {/* Pro Tip */}
@@ -505,38 +742,12 @@ const App: React.FC = () => {
                     </div>
 
                     {/* Donut Chart */}
-                    <div className="flex items-center justify-center h-48">
-                      <div className="relative w-40 h-40">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={[
-                                { name: 'Transport', value: parseInt(plan.cost_breakdown.transport.replace(/\D/g, '')) || 1 },
-                                { name: 'Stay', value: parseInt(plan.cost_breakdown.stay.replace(/\D/g, '')) || 1 },
-                                { name: 'Food', value: parseInt(plan.cost_breakdown.food.replace(/\D/g, '')) || 1 },
-                                { name: 'Activities', value: parseInt(plan.cost_breakdown.activities.replace(/\D/g, '')) || 1 },
-                              ]}
-                              innerRadius={50}
-                              outerRadius={80}
-                              paddingAngle={2}
-                              dataKey="value"
-                            >
-                              {COLORS.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                              ))}
-                            </Pie>
-                            <Tooltip
-                              contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontSize: '11px' }}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
-                        {/* Center Label */}
-                        <div className="absolute inset-0 flex flex-col items-center justify-center">
-                          <p className="text-2xl font-bold text-purple-300">₹{query.budget}</p>
-                          <p className="text-xs text-slate-500 mt-1">Total Budget</p>
-                        </div>
-                      </div>
-                    </div>
+                    <React.Suspense fallback={<div className="h-48 flex items-center justify-center text-slate-500 text-xs">Loading Chart...</div>}>
+                      <LazyCostChart
+                        costBreakdown={plan.cost_breakdown}
+                        totalBudget={query.budget}
+                      />
+                    </React.Suspense>
 
                     {/* Legend */}
                     <div className="space-y-3 pt-4 border-t border-slate-700/50">
@@ -566,6 +777,19 @@ const App: React.FC = () => {
                         <div className="min-w-0 flex-1">
                           <p className="text-xs text-slate-400 font-semibold">Activities</p>
                           <p className="text-base font-bold text-purple-300">{plan.cost_breakdown.activities}</p>
+                        </div>
+                      </div>
+
+                      {/* Disclaimer */}
+                      <div className="mt-3 p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+                          <div>
+                            <p className="text-xs text-amber-300 font-semibold mb-1">Estimated Costs</p>
+                            <p className="text-xs text-slate-400 leading-relaxed">
+                              AI-generated estimates. Verify actual fares on official booking sites.
+                            </p>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -618,7 +842,35 @@ const App: React.FC = () => {
                       <div className="space-y-2">
                         <div className="flex items-center gap-3">
                           <span className="text-blue-400 font-mono text-sm font-bold bg-blue-500/10 px-2 py-1 rounded">{item.time}</span>
-                          <h4 className="font-semibold text-slate-100 text-base">{item.activity}</h4>
+                          <h4 className="font-semibold text-slate-100 text-base flex-1">{item.activity}</h4>
+                          {item.cost && (
+                            <span className="text-amber-400 font-bold text-sm bg-amber-500/10 px-3 py-1 rounded-lg border border-amber-500/30">
+                              {item.cost}
+                            </span>
+                          )}
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => openStreetView(item.activity)}
+                              className="p-3 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-all hover:scale-110 group/btn"
+                              title="Street View"
+                            >
+                              <Eye className="w-5 h-5" />
+                            </button>
+                            <button
+                              onClick={() => openSatelliteView(item.activity)}
+                              className="p-3 rounded-lg bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-all hover:scale-110 group/btn"
+                              title="Satellite View"
+                            >
+                              <Satellite className="w-5 h-5" />
+                            </button>
+                            <button
+                              onClick={() => openPhotos(item.activity)}
+                              className="p-3 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-all hover:scale-110 group/btn"
+                              title="Photos"
+                            >
+                              <Camera className="w-5 h-5" />
+                            </button>
+                          </div>
                         </div>
                         <div className="bg-slate-800/50 border border-slate-700/50 p-4 rounded-lg flex items-start gap-3 mt-3">
                           <TrendingDown className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />

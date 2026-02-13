@@ -10,6 +10,7 @@ export interface ItineraryItem {
   time: string;
   activity: string;
   cost_saving_tip: string;
+  cost?: string; // Individual cost for this activity
 }
 
 export interface TransportOption {
@@ -36,4 +37,10 @@ export interface UserQuery {
   duration: string;
   budget: number;
   transportType: 'Train' | 'Bus' | 'Flight' | 'Any';
+  budgetBreakdown?: {
+    transport?: number;
+    stay?: number;
+    food?: number;
+    activities?: number;
+  };
 }

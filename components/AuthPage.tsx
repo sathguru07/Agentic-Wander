@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Mail, Lock, User, Eye, EyeOff, Zap } from 'lucide-react';
+import { encryptData } from '../services/securityService';
 
 interface AuthProps {
   onLogin: (email: string, name: string) => void;
@@ -12,10 +13,12 @@ export const AuthPage: React.FC<AuthProps> = ({ onLogin }) => {
   const [name, setName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [encryptedPreview, setEncryptedPreview] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setEncryptedPreview('');
 
     if (!email || !password) {
       setError('Please fill in all fields');
@@ -32,10 +35,20 @@ export const AuthPage: React.FC<AuthProps> = ({ onLogin }) => {
       return;
     }
 
-    // Simulate authentication (in real app, would call backend)
-    const displayName = isSignup ? name : email.split('@')[0];
-    localStorage.setItem('user', JSON.stringify({ email, name: displayName }));
-    onLogin(email, displayName);
+    // DEMO: Encrypt password visually for the user
+    const encryptedPassword = encryptData(password);
+    setEncryptedPreview(encryptedPassword);
+
+    // Store in localStorage for inspection
+    localStorage.setItem('demo_encrypted_password', encryptedPassword);
+
+    // Simulate authentication delay to show the encryption
+    setTimeout(() => {
+      const displayName = isSignup ? name : email.split('@')[0];
+      const userData = { email, name: displayName };
+      localStorage.setItem('user', encryptData(userData));
+      onLogin(email, displayName);
+    }, 2500);
   };
 
   return (
@@ -63,7 +76,7 @@ export const AuthPage: React.FC<AuthProps> = ({ onLogin }) => {
         {/* Auth Card */}
         <div className="group relative">
           <div className="absolute -inset-0.5 bg-gradient-to-br from-blue-600/20 to-indigo-600/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-          
+
           <div className="relative bg-slate-950/40 backdrop-blur-xl border border-blue-500/20 rounded-2xl p-8 shadow-2xl">
             {/* Tabs */}
             <div className="flex gap-4 mb-8">
@@ -72,11 +85,10 @@ export const AuthPage: React.FC<AuthProps> = ({ onLogin }) => {
                   setIsSignup(false);
                   setError('');
                 }}
-                className={`flex-1 py-2 px-4 rounded-lg font-semibold transition-all ${
-                  !isSignup
-                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                    : 'text-slate-400 hover:text-slate-300'
-                }`}
+                className={`flex-1 py-2 px-4 rounded-lg font-semibold transition-all ${!isSignup
+                  ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                  : 'text-slate-400 hover:text-slate-300'
+                  }`}
               >
                 Login
               </button>
@@ -85,11 +97,10 @@ export const AuthPage: React.FC<AuthProps> = ({ onLogin }) => {
                   setIsSignup(true);
                   setError('');
                 }}
-                className={`flex-1 py-2 px-4 rounded-lg font-semibold transition-all ${
-                  isSignup
-                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                    : 'text-slate-400 hover:text-slate-300'
-                }`}
+                className={`flex-1 py-2 px-4 rounded-lg font-semibold transition-all ${isSignup
+                  ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                  : 'text-slate-400 hover:text-slate-300'
+                  }`}
               >
                 Sign Up
               </button>
@@ -153,6 +164,22 @@ export const AuthPage: React.FC<AuthProps> = ({ onLogin }) => {
                 </div>
               </div>
 
+              {/* Encryption Preview (Demo) */}
+              {encryptedPreview && (
+                <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3 animate-pulse">
+                  <div className="flex items-center gap-2 text-emerald-300 mb-1">
+                    <Lock className="w-4 h-4" />
+                    <span className="text-xs font-bold uppercase tracking-wider">Password Encrypted</span>
+                  </div>
+                  <p className="text-[10px] text-emerald-400 font-mono break-all leading-tight">
+                    {encryptedPreview}
+                  </p>
+                  <p className="text-[10px] text-emerald-500/70 mt-1 italic">
+                    Securely stored in local vault (AES-256)
+                  </p>
+                </div>
+              )}
+
               {/* Error Message */}
               {error && (
                 <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
@@ -178,7 +205,8 @@ export const AuthPage: React.FC<AuthProps> = ({ onLogin }) => {
                   setEmail('demo@example.com');
                   setPassword('demo123');
                   setTimeout(() => {
-                    localStorage.setItem('user', JSON.stringify({ email: 'demo@example.com', name: 'Demo User' }));
+                    const demoUser = { email: 'demo@example.com', name: 'Demo User' };
+                    localStorage.setItem('user', encryptData(demoUser));
                     onLogin('demo@example.com', 'Demo User');
                   }, 100);
                 }}
